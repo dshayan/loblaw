@@ -1,4 +1,4 @@
-# loblaw
+# Loblaw
 
 A simple Telegram bot that forwards user messages to Anthropic's Claude AI and returns the responses.
 
