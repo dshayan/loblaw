@@ -10,6 +10,7 @@ const strings = require('./config/strings');
 
 // Initialize logging
 const logFile = path.join(__dirname, 'logs', 'conversation.log');
+const feedbackLogFile = path.join(__dirname, 'logs', 'feedback.log');
 // Create logs directory if it doesn't exist
 if (!fs.existsSync(path.join(__dirname, 'logs'))) {
   fs.mkdirSync(path.join(__dirname, 'logs'));
@@ -25,6 +26,21 @@ function logMessage(message) {
   
   // Append to log file
   fs.appendFileSync(logFile, logEntry);
+}
+
+// Function to log feedback
+function logFeedback(userId, message, feedbackType) {
+  const timestamp = new Date().toISOString();
+  const feedbackEntry = JSON.stringify({
+    timestamp,
+    userId,
+    message,
+    feedback: feedbackType
+  }) + '\n';
+  
+  // Append to feedback log file
+  fs.appendFileSync(feedbackLogFile, feedbackEntry);
+  logMessage(`User ${userId} provided feedback: ${feedbackType}`);
 }
 
 // Initialize the Telegram bot
@@ -45,6 +61,11 @@ const conversations = {};
 const resetKeyboard = Markup.keyboard([
   [strings.resetButtonText]
 ]).resize();
+
+// Function to check if a message contains classification
+function containsClassification(message) {
+  return message.includes('⚖️ طبقه‌بندی:');
+}
 
 // Start command
 bot.start((ctx) => {
@@ -68,6 +89,57 @@ bot.hears(strings.resetButtonText, (ctx) => {
   // Reset conversation history for this user
   conversations[userId] = [];
   ctx.reply(strings.resetMessage, resetKeyboard);
+});
+
+// Handle like button press
+bot.action('like', (ctx) => {
+  const userId = ctx.from.id;
+  const messageText = ctx.callbackQuery.message.text;
+  
+  // Log the feedback
+  logFeedback(userId, messageText, 'like');
+  
+  // Update the keyboard to show the selected option
+  ctx.editMessageReplyMarkup({
+    inline_keyboard: [
+      [
+        { text: strings.likeSelectedButton, callback_data: 'like_selected' },
+        { text: strings.dislikeButton, callback_data: 'dislike' }
+      ]
+    ]
+  });
+  
+  ctx.answerCbQuery(strings.likeButton);
+});
+
+// Handle dislike button press
+bot.action('dislike', (ctx) => {
+  const userId = ctx.from.id;
+  const messageText = ctx.callbackQuery.message.text;
+  
+  // Log the feedback
+  logFeedback(userId, messageText, 'dislike');
+  
+  // Update the keyboard to show the selected option
+  ctx.editMessageReplyMarkup({
+    inline_keyboard: [
+      [
+        { text: strings.likeButton, callback_data: 'like' },
+        { text: strings.dislikeSelectedButton, callback_data: 'dislike_selected' }
+      ]
+    ]
+  });
+  
+  ctx.answerCbQuery(strings.dislikeButton);
+});
+
+// Handle already selected buttons (do nothing)
+bot.action('like_selected', (ctx) => {
+  ctx.answerCbQuery(strings.alreadyLikedMessage);
+});
+
+bot.action('dislike_selected', (ctx) => {
+  ctx.answerCbQuery(strings.alreadyDislikedMessage);
 });
 
 // Handle messages
@@ -109,8 +181,22 @@ bot.on('text', async (ctx) => {
     // Log Claude's response
     logMessage(`AI response to user ${userId}: ${claudeResponse}`);
     
-    // Send the response back to the user with the reset keyboard
-    ctx.reply(claudeResponse, resetKeyboard);
+    // If the response contains classification, add like/dislike buttons
+    if (containsClassification(claudeResponse)) {
+      await ctx.reply(claudeResponse, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: strings.likeButton, callback_data: 'like' },
+              { text: strings.dislikeButton, callback_data: 'dislike' }
+            ]
+          ]
+        }
+      });
+    } else {
+      // Otherwise, just send the response with the reset keyboard
+      await ctx.reply(claudeResponse, resetKeyboard);
+    }
   } catch (error) {
     console.error('Error:', error);
     logMessage(`Error: ${error.message}`);
